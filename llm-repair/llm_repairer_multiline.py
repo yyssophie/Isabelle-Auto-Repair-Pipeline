@@ -44,7 +44,7 @@ class llm_repairer_multiline:
     # LLM interaction
     # ------------------------------------------------------------------
     def run_llm(self, error_message: str, error_snippet: str, additional_info = None) -> str | None:
-        openai_model = "gpt-5"
+        openai_model = "gpt-5.2"
         prompt = f"""You are an Isabelle proof engineer.
         This Isabelle/AFP 2023 theory no longer builds under Isabelle/AFP 2024.
         Given the error message and the relevant snippet, propose fixes that make it build on Isabelle 2024.
@@ -68,8 +68,26 @@ class llm_repairer_multiline:
         {error_snippet}
         """
         if additional_info:
-            prompt += f"""Additional Information about the changes between 2 versions:
-            {additional_info}"""
+            prompt += f"""
+
+        Dependency changes (IMPORTANT — read carefully):
+        The following shows how the Isabelle/HOL library lemmas that this proof
+        depends on have changed between Isabelle 2023 and 2024.  These changes
+        are the likely ROOT CAUSE of the breakage.
+
+        How to read this section:
+          - It is grouped by "[k] line N:" blocks that correspond exactly to the
+            same "[k] line N:" entries in the error message above — so the changes
+            under "[1] line 87:" are the dependencies relevant to error [1].
+          - "dep: <qualified name> @ <file>:<line>" identifies the changed lemma.
+          - "cmd lines: N-M" is the line range of the change.
+          - The unified diff (@@...) shows exactly what was added (+) or removed (-).
+
+        Use these diffs to understand WHAT changed in the library (renamed lemmas,
+        changed type-class constraints, new required parentheses, reordered
+        arguments, etc.) and apply the corresponding fix to the erroneous snippet.
+
+        {additional_info}"""
 
         client = OpenAI(api_key=API_KEY)
         response = client.chat.completions.create(
@@ -217,8 +235,9 @@ class llm_repairer_multiline:
         session: str,
         theory: str,
         max_attempts: int = 3,
-        max_chars: int = 16000,
+        max_chars: int = 20000,
         additional_info: str | None = None,
+        sheet_name: str = "llm-repair",
     ) -> Dict[str, Union[str, int]]:
         fe = failure_extractor()
         last_error_message = ""
@@ -248,6 +267,9 @@ class llm_repairer_multiline:
                         print("[repair-multi] extracting error message from last build output")
                         fe_build = build_error_message_extractor()
                         error_message = fe_build.extract_build_error_message(last_build_output, session, theory)
+                        if not error_message.strip():
+                            print("[repair-multi] no target-theory errors in build output (cascade only); reusing last known error")
+                            error_message = last_error_message
 
                     last_error_message = error_message
                     print(error_message)
@@ -267,7 +289,7 @@ class llm_repairer_multiline:
                     print("[repair-multi] calling LLM for block replacements")
                     llm_output = self.run_llm(error_message=error_message, error_snippet=error_snippet, additional_info=additional_info)
 
-                    replacements = self.parse_llm_fixes(llm_output)
+                    replacements = self.parse_llm_fixes(llm_output) # type: ignore
                     print(f"[repair-multi] parsed {len(replacements)} replacement blocks from LLM output")
                     self.apply_fixes(session=session, theory=theory, replacements=replacements)
 
@@ -320,9 +342,10 @@ class llm_repairer_multiline:
                             theory=theory,
                             attempt=attempt,
                             error_message=(error_message.strip() if error_message else last_error_message.strip()),
-                            fixes_text=llm_output.strip(),
+                            fixes_text=llm_output.strip(), # type: ignore
                             status=status,
                             elapsed_seconds=elapsed_seconds,
+                            sheet_name=sheet_name,
                         )
                         print(f"[repair-multi] wrote attempt {attempt} row to {XLSX_PATH}")
                     except Exception as e:

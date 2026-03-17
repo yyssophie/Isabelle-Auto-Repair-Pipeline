@@ -74,7 +74,10 @@ class build_error_message_extractor:
                 current_block = []
 
         if not raw_blocks:
-            return build_output.strip()
+            # No errors found in the target theory — only cascade errors from
+            # downstream theories.  Return empty string so the caller can fall
+            # back to the last known error from the target theory.
+            return ""
 
         seen = set()
         unique_blocks: List[str] = []

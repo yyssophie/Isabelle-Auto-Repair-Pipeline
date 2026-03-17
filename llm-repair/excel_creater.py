@@ -21,6 +21,7 @@ class excel_creater:
         fixes_text: str,
         status: str,  # "success" or "fail"
         elapsed_seconds: float | None = None,
+        sheet_name: str = "llm-repair",
     ) -> None:
         """
         Append one attempt row to an Excel file.
@@ -45,11 +46,14 @@ class excel_creater:
 
         if xlsx_path.exists():
             wb = openpyxl.load_workbook(xlsx_path)
-            ws = wb.active
+            if sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+            else:
+                ws = wb.create_sheet(title=sheet_name)
         else:
             wb = Workbook()
             ws = wb.active
-            ws.title = "attempts"
+            ws.title = sheet_name
 
         required_headers = [
             "session+theory",
